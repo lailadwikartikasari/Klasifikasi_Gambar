@@ -363,56 +363,66 @@ delete_unwanted_folders(base_path)
 
 """Membagi dataset menjadi train dan test dengan rasio 8:2."""
 
-def split_dataset(base_path, train_ratio=0.8):
-    # Path untuk dataset pelatihan dan pengujian
-    train_path = os.path.join(base_path, 'train')  # Folder train
-    test_path = os.path.join(base_path, 'test')  # Folder test
+def split_dataset(base_path, train_ratio=0.7, val_ratio=0.15):
+     # Path untuk dataset pelatihan, validasi, dan pengujian
+    train_path = os.path.join(base_path, 'train')
+    val_path = os.path.join(base_path, 'validation')
+    test_path = os.path.join(base_path, 'test')
 
-    # Membuat folder train dan test jika belum ada
+    # Membuat folder train, validation, dan test jika belum ada
     os.makedirs(train_path, exist_ok=True)
+    os.makedirs(val_path, exist_ok=True)
     os.makedirs(test_path, exist_ok=True)
 
-    for root, dirs, files in os.walk(base_path):  # Iterasi melalui semua folder dalam dataset
+    for root, dirs, files in os.walk(base_path):
         if root == base_path:  # Lewati folder utama
             continue
 
-        class_name = os.path.basename(root)  # Ambil nama kelas dari folder
-        if class_name in ['train', 'test']:  # Lewati folder train dan test jika sudah ada
+        class_name = os.path.basename(root)  # Ambil nama kelas
+        if class_name in ['train', 'validation', 'test']:  # Lewati jika sudah ada
             continue
 
-        # Buat folder untuk kelas di dalam train dan test
+        # Buat folder untuk kelas di dalam train, validation, dan test
         train_class_path = os.path.join(train_path, class_name)
+        val_class_path = os.path.join(val_path, class_name)
         test_class_path = os.path.join(test_path, class_name)
         os.makedirs(train_class_path, exist_ok=True)
+        os.makedirs(val_class_path, exist_ok=True)
         os.makedirs(test_class_path, exist_ok=True)
 
         # Acak urutan file sebelum dibagi
         random.shuffle(files)
-        split_index = int(train_ratio * len(files))  # Hitung jumlah file untuk train
-        train_files = files[:split_index]  # Ambil bagian untuk train
-        test_files = files[split_index:]  # Sisanya untuk test
+
+        # Hitung jumlah file untuk setiap set
+        total_files = len(files)
+        train_split = int(train_ratio * total_files)
+        val_split = int((train_ratio + val_ratio) * total_files)
+
+        train_files = files[:train_split]
+        val_files = files[train_split:val_split]
+        test_files = files[val_split:]
 
         # Pindahkan file ke folder train
         for file in train_files:
-            src_file = os.path.join(root, file)
-            dst_file = os.path.join(train_class_path, file)
-            shutil.move(src_file, dst_file)  # Pindahkan file
+            shutil.move(os.path.join(root, file), os.path.join(train_class_path, file))
+
+        # Pindahkan file ke folder validation
+        for file in val_files:
+            shutil.move(os.path.join(root, file), os.path.join(val_class_path, file))
 
         # Pindahkan file ke folder test
         for file in test_files:
-            src_file = os.path.join(root, file)
-            dst_file = os.path.join(test_class_path, file)
-            shutil.move(src_file, dst_file)  # Pindahkan file
+            shutil.move(os.path.join(root, file), os.path.join(test_class_path, file))
 
 # Path ke folder utama yang berisi dataset
 base_path = "/content/Tomato"
 
-# Jalankan fungsi untuk membagi dataset menjadi train dan test
+# Jalankan fungsi untuk membagi dataset menjadi train, validation, dan test
 split_dataset(base_path)
 
-"""Menghapus folder selain folder train dan test."""
+"""Menghapus folder selain folder train,test, dan Validation"""
 
-def delete_unwanted_folders(base_path, keep_folders=['train', 'test']):
+def delete_unwanted_folders(base_path, keep_folders=['train', 'test', 'validation']):
     for item in os.listdir(base_path):  # Iterasi semua item dalam folder utama
         item_path = os.path.join(base_path, item)
         if os.path.isdir(item_path) and item not in keep_folders:  # Hapus jika bukan folder yang dipertahankan
@@ -434,8 +444,10 @@ Dataset test hanya akan dilakukan rescale.
 
 def augment_and_resize_dataset(base_path, img_size=(150, 150), batch_size=32):
     train_path = os.path.join(base_path, 'train')  # Path ke folder train
+    val_path = os.path.join(base_path, 'validation')  # Path ke folder validation
     test_path = os.path.join(base_path, 'test')  # Path ke folder test
 
+    # Augmentasi hanya untuk train set
     train_datagen = ImageDataGenerator(
         rescale=1./255,  # Normalisasi nilai piksel ke [0,1]
         zoom_range=0.2,  # Zooming acak hingga 20%
@@ -443,8 +455,10 @@ def augment_and_resize_dataset(base_path, img_size=(150, 150), batch_size=32):
         fill_mode='nearest'  # Mengisi piksel kosong akibat transformasi
     )
 
-    test_datagen = ImageDataGenerator(rescale=1./255)  # Hanya normalisasi untuk data uji
+    # Hanya normalisasi untuk validasi & test set (tidak ada augmentasi)
+    val_test_datagen = ImageDataGenerator(rescale=1./255)
 
+    # Generator untuk train set
     train_generator = train_datagen.flow_from_directory(
         train_path,
         target_size=img_size,  # Ubah ukuran gambar ke target
@@ -452,20 +466,29 @@ def augment_and_resize_dataset(base_path, img_size=(150, 150), batch_size=32):
         class_mode='categorical'  # Klasifikasi multi-kelas
     )
 
-    test_generator = test_datagen.flow_from_directory(
+    # Generator untuk validation set
+    val_generator = val_test_datagen.flow_from_directory(
+        val_path,
+        target_size=img_size,
+        batch_size=batch_size,
+        class_mode='categorical'
+    )
+
+    # Generator untuk test set
+    test_generator = val_test_datagen.flow_from_directory(
         test_path,
         target_size=img_size,
         batch_size=batch_size,
         class_mode='categorical'
     )
 
-    return train_generator, test_generator  # Mengembalikan generator untuk train & test
+    return train_generator, val_generator, test_generator  # Mengembalikan 3 generator
 
-# Path ke folder utama
+# Path ke folder utama dataset
 base_path = "/content/Tomato"
 
 # Jalankan fungsi augmentasi dan resize dataset
-train_generator, test_generator = augment_and_resize_dataset(base_path)
+train_generator, val_generator, test_generator = augment_and_resize_dataset(base_path)
 
 """Menampilkan kelas-kelas yang terdapat pada dataset."""
 
